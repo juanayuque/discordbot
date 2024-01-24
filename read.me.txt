@@ -1,0 +1,14 @@
+pip install discord.py youtube_dl PyNaCl
+
+
+pip install --upgrade youtube_dl
+
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')) //install chocolatey if needed
+
+pip install --upgrade --force-reinstall "git+https://github.com/ytdl-org/youtube-dl.git" //update manually yt_dl, source https://stackoverflow.com/questions/76547124/unable-to-extract-uploader-id
+
+choco install ffmpeg //install fmpeg 
+
+cd to the directory 
+
+run Bianca.py
