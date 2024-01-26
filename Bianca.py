@@ -1,4 +1,5 @@
 import discord
+import re
 from discord.ext import commands
 import youtube_dl
 import asyncio
@@ -188,12 +189,15 @@ async def add_event(name, timestamp, member_ids, channel_id):
                          (name, timestamp, member_str, channel_id))
         event_id_cursor = await db.execute('SELECT last_insert_rowid()')
         event_id = (await event_id_cursor.fetchone())[0]
-        # Schedule reminders
-        for delta in [timedelta(days=1), timedelta(hours=1), timedelta(minutes=15)]:
+
+        # Schedule reminders - only 1 day and 15 minutes before the event
+        for delta in [timedelta(days=1), timedelta(minutes=15)]:
             reminder_time = datetime.fromtimestamp(timestamp, tz=pytz.utc) - delta
-            await db.execute('INSERT INTO reminders (event_id, reminder_time, sent) VALUES (?, ?, ?)', (event_id, int(reminder_time.timestamp()), 0))
+            await db.execute('INSERT INTO reminders (event_id, reminder_time, sent) VALUES (?, ?, ?)', 
+                             (event_id, int(reminder_time.timestamp()), 0))
 
         await db.commit()
+
 
 
 async def check_reminders():
@@ -209,7 +213,7 @@ async def check_reminders():
                 if event:
                     event_name, member_ids, channel_id, timestamp = event  # Fetch the timestamp here
                     member_mentions = ' '.join([f'<@{member_id}>' for member_id in member_ids.split(',')])
-                    reminder_message = f"Reminder: The {event_name} run is scheduled for <t:{timestamp}:R>. {member_mentions}"
+                    reminder_message = f"Reminder: **{event_name}**  <t:{timestamp}:R>. {member_mentions}"
                     channel = bot.get_channel(channel_id)
                     if channel:
                         await channel.send(reminder_message)
@@ -226,74 +230,96 @@ async def on_ready():
 
 
 @bot.command(name='host')
-async def host(ctx):
-    select = discord.ui.Select(
-        options=[
-            discord.SelectOption(label="Magnus", value="magnus"),
-            discord.SelectOption(label="Empress", value="empress"),
-            discord.SelectOption(label="Pink Bean", value="pink_bean")
-        ]
-    )
-
-    async def select_callback(interaction: discord.Interaction):
-        raid_type_value = interaction.data['values'][0]
-        raid_type_readable = raid_type_value.replace('_', ' ').title()
-        await interaction.response.send_message(f"Selected raid: {raid_type_readable}. Please enter the UNIX timestamp for the event.", 
-            ephemeral=True
+async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, members: str = None):
+    if raid_type is None or unix_timestamp is None or members is None:
+        # Display the select options
+        select = discord.ui.Select(
+            options=[
+                discord.SelectOption(label="Magnus", value="magnus"),
+                discord.SelectOption(label="Empress", value="empress"),
+                discord.SelectOption(label="PinkBean", value="pink_bean")
+            ]
         )
 
-        def check(m):
-            return m.author == ctx.author and m.channel == ctx.channel
-
-        try:
-            msg = await bot.wait_for('message', check=check, timeout=120.0)
-            event_unix_timestamp = int(msg.content)
-
-            members = ctx.channel.members
-            member_options = [discord.SelectOption(label=member.display_name, value=str(member.id)) for member in members if not member.bot]
-
-            if not member_options:
-                await ctx.send("No members available for alerts.")
-                return
-
-            member_select = discord.ui.Select(
-                options=member_options,
-                placeholder="Select members to notify",
-                min_values=1,
-                max_values=len(member_options)
+        async def select_callback(interaction: discord.Interaction):
+            raid_type_value = interaction.data['values'][0]
+            raid_type_readable = raid_type_value.replace('_', ' ').title()
+            await interaction.response.send_message(
+                f"Selected raid: {raid_type_readable}. Please enter the UNIX timestamp for the event.", 
+                ephemeral=True
             )
 
-            async def member_select_callback(interaction: discord.Interaction):
-                selected_member_ids = interaction.data['values']
-                selected_members = [member for member in members if str(member.id) in selected_member_ids]
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
 
-                # Inside the event command, after the user has selected the raid type and timestamp
-                await add_event(raid_type_readable, event_unix_timestamp, [member.id for member in selected_members], ctx.channel.id)
+            try:
+                msg = await bot.wait_for('message', check=check, timeout=120.0)
+                event_unix_timestamp = int(msg.content)
 
+                members = ctx.channel.members
+                member_options = [discord.SelectOption(label=member.display_name, value=str(member.id)) for member in members if not member.bot]
 
-                member_mentions = '\n'.join([f"(<@{member.id}>)" for member in selected_members])
-                formatted_message = (
-                    f"'{raid_type_readable}' successfully scheduled for <t:{event_unix_timestamp}:F>.\n\n"
-                    f"Members\n{member_mentions}\n\n"
-                    "Reminders will be sent 1 day, 1 hour and 15 minutes before the timestamp :) !"
+                if not member_options:
+                    await ctx.send("No members available for alerts.")
+                    return
+
+                member_select = discord.ui.Select(
+                    options=member_options,
+                    placeholder="Select members to notify",
+                    min_values=1,
+                    max_values=len(member_options)
                 )
-                await interaction.response.send_message(formatted_message)
 
-            member_select.callback = member_select_callback
-            view = discord.ui.View()
-            view.add_item(member_select)
-            await interaction.followup.send("Select members that will get reminders:", view=view, ephemeral=True)
+                async def member_select_callback(interaction: discord.Interaction):
+                    selected_member_ids = interaction.data['values']
+                    selected_members = [member for member in members if str(member.id) in selected_member_ids]
 
+                    await add_event(raid_type_readable, event_unix_timestamp, [member.id for member in selected_members], ctx.channel.id)
 
+                    member_mentions = ''.join([f"<@{member.id}>" for member in selected_members])
+                    formatted_message = (
+                        f"**{raid_type_readable}**: <t:{event_unix_timestamp}:F>"
+                        f"\n{member_mentions}"
+                        #"Reminders will be sent 1 day, 1 hour and 15 minutes before the timestamp."
+                    )
+                    await interaction.response.send_message(formatted_message)
+
+                member_select.callback = member_select_callback
+                view = discord.ui.View()
+                view.add_item(member_select)
+                await interaction.followup.send("Select members that will get reminders:", view=view, ephemeral=True)
+
+            except ValueError:
+                await ctx.send("Invalid UNIX timestamp. Please enter a valid number.")
+            except asyncio.TimeoutError:
+                await ctx.send("You took too long to respond.")
+
+        select.callback = select_callback
+        view = discord.ui.View()
+        view.add_item(select)
+        await ctx.send("Which raid are you hosting?", view=view)
+
+    else:
+        # Process the command with parameters
+        raid_type_readable = raid_type.replace('_', ' ').title()
+        try:
+            event_unix_timestamp = int(unix_timestamp)
+
+            # Use a regular expression to find all user mentions in the string
+            member_ids = [int(user_id) for user_id in re.findall(r'<@!?(\d+)>', members)]
+
+            await add_event(raid_type_readable, event_unix_timestamp, member_ids, ctx.channel.id)
+
+            member_mentions = ' '.join([f'<@{member_id}>' for member_id in member_ids])
+            formatted_message = (
+                f"**{raid_type_readable}**:  <t:{event_unix_timestamp}:F>"
+                f"\n{member_mentions}"
+                #"Reminders will be sent 1 day, 1 hour and 15 minutes before the timestamp."
+            )
+            await ctx.send(formatted_message)
         except ValueError:
-            await ctx.send("Invalid UNIX timestamp. Please enter a valid number.")
-        except asyncio.TimeoutError:
-            await ctx.send("You took too long to respond.")
+            await ctx.send("Invalid input. Please use the format: !host <RaidType> <UnixTimestamp> <@Member1 @Member2 ...>")
 
-    select.callback = select_callback
-    view = discord.ui.View()
-    view.add_item(select)
-    await ctx.send("Which raid are you hosting?", view=view)
 
 # ... [Rest of the code including the add_event function and database setup] ...
 
