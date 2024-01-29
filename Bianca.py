@@ -404,7 +404,7 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
 
 @bot.command(name='hoststatus')
 async def hoststatus(ctx):
-    current_timestamp = int(datetime.datetime.now().timestamp())  # Get current timestamp
+    current_timestamp = int(datetime.now().timestamp())  # Get current timestamp
     async with aiosqlite.connect(DB_PATH) as db:
         # Select only future events
         cursor = await db.execute('SELECT id, name, timestamp FROM events WHERE creator_id = ? AND timestamp > ?', (ctx.author.id, current_timestamp))
