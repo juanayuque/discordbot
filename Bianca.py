@@ -58,6 +58,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
 @bot.command()
 async def play(ctx, url):
+    guild_id = str(ctx.guild.id)
+
     if ctx.author.voice is None:
         await ctx.send("You are not in a voice channel.")
         return
@@ -68,34 +70,35 @@ async def play(ctx, url):
     elif ctx.voice_client.channel != ctx.author.voice.channel:
         await ctx.voice_client.move_to(ctx.author.voice.channel)
 
-    try:
-        async with ctx.typing():
-            player = await YTDLSource.from_url(url, loop=bot.loop)
-            ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
+    async with ctx.typing():
+        player = await YTDLSource.from_url(url, loop=bot.loop)
+        song_title = player.title
 
-        await ctx.send(f'Now playing: {player.title}')
-    except youtube_dl.DownloadError as e:
-        await ctx.send(f'An error occurred while downloading the video: {e}')
-
-@bot.command()
-async def playlist(ctx, url: str = None):
-    guild_id = str(ctx.guild.id)  # Get the guild ID
     async with aiosqlite.connect(DB_PATH) as db:
-        if url:
+        if ctx.voice_client.is_playing():
             # Add song to playlist
-            player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-            await db.execute('INSERT INTO playlist (guild_id, url, title) VALUES (?, ?, ?)', (guild_id, url, player.title))
+            await db.execute('INSERT INTO playlist (guild_id, url, title) VALUES (?, ?, ?)', (guild_id, url, song_title))
             await db.commit()
-            await ctx.send(f'Added to playlist: {player.title}')
+            await ctx.send(f'Added to playlist: {song_title}')
         else:
-            # Show current playlist for this guild
-            cursor = await db.execute('SELECT title FROM playlist WHERE guild_id = ?', (guild_id,))
-            songs = await cursor.fetchall()
-            if songs:
-                playlist_str = '\n'.join([f'{idx + 1}. {song[0]}' for idx, song in enumerate(songs)])
-                await ctx.send(f'Current Playlist:\n{playlist_str}')
-            else:
-                await ctx.send('The playlist is currently empty.')
+            # Play the song immediately
+            ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(ctx), bot.loop))
+            await ctx.send(f'Now playing: {song_title}')
+
+
+async def play_next_song(ctx):
+    guild_id = str(ctx.guild.id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT url FROM playlist WHERE guild_id = ? ORDER BY id LIMIT 1', (guild_id,))
+        next_song = await cursor.fetchone()
+        if next_song:
+            url = next_song[0]
+            player = await YTDLSource.from_url(url, loop=bot.loop)
+            ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(ctx), bot.loop))
+            await db.execute('DELETE FROM playlist WHERE guild_id = ? AND url = ?', (guild_id, url))
+            await db.commit()
+            await ctx.send(f'Now playing: {player.title}')
+
 @bot.command()
 async def clear(ctx):
     guild_id = str(ctx.guild.id)  # Get the guild ID
@@ -106,15 +109,28 @@ async def clear(ctx):
 @bot.command()
 async def next(ctx):
     guild_id = str(ctx.guild.id)  # Get the guild ID
+
+    if ctx.voice_client is None or not ctx.voice_client.is_connected():
+        await ctx.send("I'm not connected to a voice channel.")
+        return
+
+    # Stop the current song if any
+    ctx.voice_client.stop()
+
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT url FROM playlist WHERE guild_id = ? LIMIT 1', (guild_id,))
+        cursor = await db.execute('SELECT url FROM playlist WHERE guild_id = ? ORDER BY id LIMIT 1', (guild_id,))
         song = await cursor.fetchone()
+
         if song:
-            await play(ctx, song[0])  # Reuse your play command logic
-            await db.execute('DELETE FROM playlist WHERE guild_id = ? AND url = ?', (guild_id, song[0]))
+            url = song[0]
+            player = await YTDLSource.from_url(url, loop=bot.loop)
+            ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(ctx), bot.loop))
+            await db.execute('DELETE FROM playlist WHERE guild_id = ? AND url = ?', (guild_id, url))
             await db.commit()
+            await ctx.send(f'Now playing: {player.title}')
         else:
             await ctx.send('No more songs in the playlist.')
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.id == bot.user.id and after.channel is None:
