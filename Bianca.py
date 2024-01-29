@@ -401,16 +401,20 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
         except ValueError:
             await ctx.send("Invalid input. Please use the format: !host <RaidType> <UnixTimestamp> <@Member1 @Member2 ...>")
 
+
 @bot.command(name='hoststatus')
 async def hoststatus(ctx):
+    current_timestamp = int(datetime.datetime.now().timestamp())  # Get current timestamp
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT id, name, timestamp FROM events WHERE creator_id = ?', (ctx.author.id,))
+        # Select only future events
+        cursor = await db.execute('SELECT id, name, timestamp FROM events WHERE creator_id = ? AND timestamp > ?', (ctx.author.id, current_timestamp))
         events = await cursor.fetchall()
         if events:
-            response = "Your events:\n" + '\n'.join([f"ID: {event[0]}, Name: {event[1]}, Time: <t:{event[2]}:F>" for event in events])
+            response = "Your upcoming events:\n" + '\n'.join([f"ID: {event[0]}, Name: {event[1]}, Time: <t:{event[2]}:F>" for event in events])
         else:
-            response = "You are not hosting anything."
+            response = "You have no upcoming events."
         await ctx.send(response)
+
 
 @bot.command(name='hostcancel')
 async def hostcancel(ctx, identifier: str = None):
