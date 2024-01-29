@@ -57,16 +57,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
 @bot.command()
-async def join(ctx):
-    if ctx.author.voice is None:
-        await ctx.send("You are not in a voice channel.")
-        return
-    channel = ctx.author.voice.channel
-    if ctx.voice_client is not None:
-        return await ctx.voice_client.move_to(channel)
-    await channel.connect()
-
-@bot.command()
 async def play(ctx, url):
     if ctx.author.voice is None:
         await ctx.send("You are not in a voice channel.")
@@ -86,6 +76,54 @@ async def play(ctx, url):
         await ctx.send(f'Now playing: {player.title}')
     except youtube_dl.DownloadError as e:
         await ctx.send(f'An error occurred while downloading the video: {e}')
+
+@bot.command()
+async def playlist(ctx, url: str = None):
+    guild_id = str(ctx.guild.id)  # Get the guild ID
+    async with aiosqlite.connect(DB_PATH) as db:
+        if url:
+            # Add song to playlist
+            player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+            await db.execute('INSERT INTO playlist (guild_id, url, title) VALUES (?, ?, ?)', (guild_id, url, player.title))
+            await db.commit()
+            await ctx.send(f'Added to playlist: {player.title}')
+        else:
+            # Show current playlist for this guild
+            cursor = await db.execute('SELECT title FROM playlist WHERE guild_id = ?', (guild_id,))
+            songs = await cursor.fetchall()
+            if songs:
+                playlist_str = '\n'.join([f'{idx + 1}. {song[0]}' for idx, song in enumerate(songs)])
+                await ctx.send(f'Current Playlist:\n{playlist_str}')
+            else:
+                await ctx.send('The playlist is currently empty.')
+@bot.command()
+async def clear(ctx):
+    guild_id = str(ctx.guild.id)  # Get the guild ID
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM playlist WHERE guild_id = ?', (guild_id,))
+        await db.commit()
+        await ctx.send('Playlist cleared.')
+@bot.command()
+async def next(ctx):
+    guild_id = str(ctx.guild.id)  # Get the guild ID
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT url FROM playlist WHERE guild_id = ? LIMIT 1', (guild_id,))
+        song = await cursor.fetchone()
+        if song:
+            await play(ctx, song[0])  # Reuse your play command logic
+            await db.execute('DELETE FROM playlist WHERE guild_id = ? AND url = ?', (guild_id, song[0]))
+            await db.commit()
+        else:
+            await ctx.send('No more songs in the playlist.')
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.id == bot.user.id and after.channel is None:
+        # Bot has been disconnected from the channel
+        guild_id = str(before.channel.guild.id)  # Get the guild ID
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('DELETE FROM playlist WHERE guild_id = ?', (guild_id,))
+            await db.commit()
+
 
 @bot.command()
 async def fairloot(ctx):
@@ -139,6 +177,7 @@ async def content(ctx):
             discord.SelectOption(label="Dream", value="DreamMS"),
             discord.SelectOption(label="Reboot", value="Reboot"),
             discord.SelectOption(label="IRL", value="IRL"),
+            # You can add more options here if needed
         ]
     )
 
@@ -154,10 +193,11 @@ async def content(ctx):
 
         selected_value = interaction.data['values'][0]  # Get the selected value from the interaction
         choice = random.choice(content_options[selected_value])
-        await interaction.response.send_message(f"Random {selected_value} content:\n\n{choice}")
-
+        # Personalized greeting with the user's name
+        await interaction.response.send_message(f"Hello **{interaction.user.display_name}**! \nYour {selected_value} RNG is: {choice}")
 
     select.callback = select_callback
+
 
     # Create a view to hold the select menu
     view = discord.ui.View()
@@ -172,26 +212,32 @@ async def setup_database():
                             name TEXT,
                             timestamp INTEGER,
                             members TEXT,
-                            channel_id INTEGER)''')
+                            channel_id INTEGER,
+                            creator_id INTEGER)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS reminders (
                             id INTEGER PRIMARY KEY,
                             event_id INTEGER,
                             reminder_time INTEGER,
                             sent INTEGER,
                             FOREIGN KEY(event_id) REFERENCES events(id))''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS playlist (
+                            id INTEGER PRIMARY KEY,
+                            guild_id TEXT,
+                            url TEXT,
+                            title TEXT)''')
         await db.commit()
 
 
-async def add_event(name, timestamp, member_ids, channel_id):
+async def add_event(name, timestamp, member_ids, channel_id, creator_id):
     member_str = ','.join(map(str, member_ids))
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('INSERT INTO events (name, timestamp, members, channel_id) VALUES (?, ?, ?, ?)', 
-                         (name, timestamp, member_str, channel_id))
+        await db.execute('INSERT INTO events (name, timestamp, members, channel_id, creator_id) VALUES (?, ?, ?, ?, ?)', 
+                         (name, timestamp, member_str, channel_id, creator_id))
         event_id_cursor = await db.execute('SELECT last_insert_rowid()')
         event_id = (await event_id_cursor.fetchone())[0]
 
-        # Schedule reminders - only 1 day and 15 minutes before the event
-        for delta in [timedelta(days=1), timedelta(minutes=15)]:
+        # Schedule reminders - only 1 day and 60 minutes before the event
+        for delta in [timedelta(days=1), timedelta(minutes=60)]:
             reminder_time = datetime.fromtimestamp(timestamp, tz=pytz.utc) - delta
             await db.execute('INSERT INTO reminders (event_id, reminder_time, sent) VALUES (?, ?, ?)', 
                              (event_id, int(reminder_time.timestamp()), 0))
@@ -274,7 +320,7 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
                     selected_member_ids = interaction.data['values']
                     selected_members = [member for member in members if str(member.id) in selected_member_ids]
 
-                    await add_event(raid_type_readable, event_unix_timestamp, [member.id for member in selected_members], ctx.channel.id)
+                    await add_event(raid_type_readable, event_unix_timestamp, [member.id for member in selected_members], ctx.channel.id, ctx.author.id)
 
                     member_mentions = ''.join([f"<@{member.id}>" for member in selected_members])
                     formatted_message = (
@@ -308,7 +354,7 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
             # Use a regular expression to find all user mentions in the string
             member_ids = [int(user_id) for user_id in re.findall(r'<@!?(\d+)>', members)]
 
-            await add_event(raid_type_readable, event_unix_timestamp, member_ids, ctx.channel.id)
+            await add_event(raid_type_readable, event_unix_timestamp, member_ids, ctx.channel.id, ctx.author.id)
 
             member_mentions = ' '.join([f'<@{member_id}>' for member_id in member_ids])
             formatted_message = (
@@ -319,6 +365,59 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
             await ctx.send(formatted_message)
         except ValueError:
             await ctx.send("Invalid input. Please use the format: !host <RaidType> <UnixTimestamp> <@Member1 @Member2 ...>")
+
+@bot.command(name='hoststatus')
+async def hoststatus(ctx):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT id, name, timestamp FROM events WHERE creator_id = ?', (ctx.author.id,))
+        events = await cursor.fetchall()
+        if events:
+            response = "Your events:\n" + '\n'.join([f"ID: {event[0]}, Name: {event[1]}, Time: <t:{event[2]}:F>" for event in events])
+        else:
+            response = "You are not hosting anything."
+        await ctx.send(response)
+
+@bot.command(name='hostcancel')
+async def hostcancel(ctx, identifier: str = None):
+    if identifier is None:
+        # User did not provide an identifier
+        await ctx.send("Please use the following structure: !hostcancel \"Event Name or Event ID\"")
+        return
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if identifier.isdigit():
+            # Treat the identifier as an Event ID
+            event_id = int(identifier)
+            cursor = await db.execute('SELECT creator_id FROM events WHERE id = ?', (event_id,))
+            result = await cursor.fetchone()
+
+            if result and result[0] == ctx.author.id:
+                await db.execute('DELETE FROM events WHERE id = ?', (event_id,))
+                await db.execute('DELETE FROM reminders WHERE event_id = ?', (event_id,))
+                await db.commit()
+                await ctx.send(f"Event with ID {event_id} deleted.")
+            else:
+                await ctx.send("No event found with that ID, or you do not have permission to delete it.")
+
+        else:
+            # Treat the identifier as an Event Name
+            cursor = await db.execute('SELECT id FROM events WHERE name = ? AND creator_id = ?', (identifier, ctx.author.id))
+            events = await cursor.fetchall()
+
+            if not events:
+                await ctx.send("No events found with that name, or you do not have permission to delete them.")
+                return
+
+            for event in events:
+                event_id = event[0]
+                await db.execute('DELETE FROM events WHERE id = ?', (event_id,))
+                await db.execute('DELETE FROM reminders WHERE event_id = ?', (event_id,))
+
+            await db.commit()
+            await ctx.send(f"All events named '{identifier}' have been deleted.")
+
+
+
 
 
 # ... [Rest of the code including the add_event function and database setup] ...
