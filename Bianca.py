@@ -7,11 +7,14 @@ import random
 from collections import deque
 import humanize
 import aiosqlite
+import os
+import glob
 from datetime import datetime, timedelta
 import pytz
 
 DB_PATH = 'database.db'
 
+os.makedirs('songs', exist_ok=True)
 intents = discord.Intents.default()
 intents.voice_states = True
 intents.message_content = True 
@@ -22,7 +25,7 @@ youtube_dl.utils.bug_reports_message = lambda: ''
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
-    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'outtmpl': 'songs/%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
@@ -139,6 +142,22 @@ async def on_voice_state_update(member, before, after):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('DELETE FROM playlist WHERE guild_id = ?', (guild_id,))
             await db.commit()
+
+        # Updated path to the directory where songs are downloaded
+        download_path = 'songs'  # or './songs' if in the same directory as your script
+
+        if os.path.exists(download_path):
+            # Remove downloaded files
+            for file in glob.glob(os.path.join(download_path, '*')):
+                try:
+                    os.remove(file)
+                    print(f"Deleted file: {file}")  # Logging which file is deleted
+                except Exception as e:
+                    print(f"Error deleting file {file}: {e}")  # Logging any error
+        else:
+            print(f"Directory not found: {download_path}")
+
+
 
 
 @bot.command()
