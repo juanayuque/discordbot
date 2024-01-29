@@ -439,8 +439,9 @@ async def hostcancel(ctx, identifier: str = None):
                 await ctx.send("No event found with that ID, or you do not have permission to delete it.")
 
         else:
-            # Treat the identifier as an Event Name
-            cursor = await db.execute('SELECT id FROM events WHERE name = ? AND creator_id = ?', (identifier, ctx.author.id))
+            # Treat the identifier as an Event Name (case-insensitive)
+            identifier_lower = identifier.lower()  # Convert identifier to lowercase
+            cursor = await db.execute('SELECT id FROM events WHERE LOWER(name) = ? AND creator_id = ?', (identifier_lower, ctx.author.id))
             events = await cursor.fetchall()
 
             if not events:
@@ -454,12 +455,6 @@ async def hostcancel(ctx, identifier: str = None):
 
             await db.commit()
             await ctx.send(f"All events named '{identifier}' have been deleted.")
-
-
-
-
-
-# ... [Rest of the code including the add_event function and database setup] ...
 
 
 
