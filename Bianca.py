@@ -1,4 +1,5 @@
 import discord
+from config import TOKEN
 import re
 from discord.ext import commands
 import youtube_dl
@@ -461,5 +462,4 @@ async def hostcancel(ctx, identifier: str = None):
 # Initialize the database
 asyncio.run(setup_database())
 
-# Don't forget to replace 'YOUR_BOT_TOKEN' with your actual bot token
-bot.run('MTE5OTA5NTE1MTU2MjMzODM2NQ.GgDswI.fB52I8BLrUmgnua4BBil9CPeFsnZHVWfa5w0fY')
+bot.run(TOKEN)
