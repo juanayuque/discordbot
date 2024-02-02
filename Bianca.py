@@ -205,13 +205,13 @@ async def roll(ctx, max_roll: int = 100):
     roll_result = random.randint(0, max_roll)
     await ctx.send(f"You rolled a {roll_result} (0-{max_roll}).")
 
-@bot.command(name="content", description="Choose a game and get a random content")
+@bot.command(name="content", description="Choose an activity")
 async def content(ctx):
     # Create a select menu
     select = discord.ui.Select(
         options=[
-            discord.SelectOption(label="Dream", value="DreamMS"),
-            discord.SelectOption(label="Reboot", value="Reboot"),
+            discord.SelectOption(label="Study", value="Study"),
+            discord.SelectOption(label="Workout", value="Workout"),
             discord.SelectOption(label="IRL", value="IRL"),
             # You can add more options here if needed
         ]
@@ -219,12 +219,10 @@ async def content(ctx):
 
     async def select_callback(interaction: discord.Interaction):
         content_options = {
-            "DreamMS": [":book: Read forum ban appeals:book: ", " <:writef3:1162467130957123624>  Time to CZAK!!:smiling_imp: ", " <:pandarob:1162459089176105033>  EMPRESS, you seem like you need belt scrolls <:pandarob:1162459089176105033>  ", "<:Vina:1162474958958628974>   CHAOS SCROLL IT", "<:pandagrim:1162467121163419759>  mag mag mag mag <:pandagrim:1162467121163419759>  ", "<:pandacool:1162459076496736317>    18 man ncht it. **coins for days**", "<:writef3:1108027204241199225> Did you do **dailies** yet?", "<:pandaree:1162459088244977775>  Have you tried Farming?", "PB it ... time for ROTS <:takemymoney:1162467124489494650>  ", " <:pandaelf:1162459081345335306>   Reroll for the 22nd time D'oh", " :money_with_wings: Swipe for boxes $$, help dreaM get his lambo :money_with_wings: ", "Chu Chu, it's the CWK TRAIN :railway_track: ", "CousinMS it. <:wechat:1162459740790591528>   "],
-            "Reboot": [":x: Quit reboot and play DreamMS :x: "],    
-            "reboot": ["dailies", "monster park", "legion", "farm", "Cube for that triple prime ", "Suffer in vhilla", "Coconut", "Quit and play Dream"],
-            "overwatch": ["Play as TANK", "Play as Support", "Play as DPS", "Play as Mercy", "Play as Moira", "Play as Reaper", "Play as Reinhardt"],
+            "Study": ["Read the news NOW!!", 'Podcast TIME', 'Study for your next exam', 'LeetCode'],
+            "Workout": ["Legs day", 'Go out and run for 30 minutes', 'Chest day!!'],    
             "IRL": [":money_with_wings:  Treat yourself with a nice gift :money_with_wings: ", "Pet your dog🐶", ":saluting_face:  Time to GYM (or some kind of sport :golf: )", "Get some Boba :bubble_tea: ", "Go watch that movie you've been thinking about :film_frames: ", "Drink water :baby_bottle:  ", ":pizza:  Eat Pizza :pizza: ", "Eat haidilao YUM YUM", "YOGAAA", "Buy feet pics", ":warning:  call parents and get scolded for not being perfect child :warning: ", "Tell John a joke :joy: "],
-            "Anything": ["dailies", "czak", "4 man ncht", "5-6 man ncht", "18 man ncht", "cwk", "Magnus", "FL emp", "Pink Bean", "OW tank", "OW support", "OW DPS", "PlateUp"]
+            
         }
 
         selected_value = interaction.data['values'][0]  # Get the selected value from the interaction
@@ -317,9 +315,9 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
         # Display the select options
         select = discord.ui.Select(
             options=[
-                discord.SelectOption(label="Magnus", value="magnus"),
-                discord.SelectOption(label="Empress", value="empress"),
-                discord.SelectOption(label="PinkBean", value="pink_bean")
+                discord.SelectOption(label="Study", value="study"),
+                discord.SelectOption(label="Dinner", value="dinner"),
+                discord.SelectOption(label="Facetime", value="facetime")
             ]
         )
 
@@ -327,7 +325,7 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
             raid_type_value = interaction.data['values'][0]
             raid_type_readable = raid_type_value.replace('_', ' ').title()
             await interaction.response.send_message(
-                f"Selected raid: {raid_type_readable}. Please enter the UNIX timestamp for the event.", 
+                f"Selected activity: {raid_type_readable}. Please enter the UNIX timestamp for the event.", 
                 ephemeral=True
             )
 
@@ -362,7 +360,6 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
                     formatted_message = (
                         f"**{raid_type_readable}**: <t:{event_unix_timestamp}:F>"
                         f"\n{member_mentions}"
-                        #"Reminders will be sent 1 day, 1 hour and 15 minutes before the timestamp."
                     )
                     await interaction.response.send_message(formatted_message)
 
@@ -379,7 +376,7 @@ async def host(ctx, raid_type: str = None, unix_timestamp: str = None, *, member
         select.callback = select_callback
         view = discord.ui.View()
         view.add_item(select)
-        await ctx.send("Which raid are you hosting?", view=view)
+        await ctx.send("Which activity you want to schedule?", view=view)
 
     else:
         # Process the command with parameters
