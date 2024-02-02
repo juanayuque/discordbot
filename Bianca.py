@@ -237,7 +237,7 @@ async def content(ctx):
     view = discord.ui.View()
     view.add_item(select)
 
-    await ctx.send("Choose your game:", view=view)
+    await ctx.send("Choose your activity:", view=view)
 
 async def setup_database():
     async with aiosqlite.connect(DB_PATH) as db:
